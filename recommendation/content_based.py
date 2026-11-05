@@ -66,11 +66,13 @@ class ContentBasedRecommender:
         book_id: str,
         limit: int = 5,
         target_tropes: Optional[List[str]] = None,
+        exclude_book_ids: Optional[Any] = None,
     ) -> List[Dict[str, Any]]:
         """
         Recommend books most similar to target book_id using cosine similarity.
         Optionally filter or boost candidates containing specified target tropes.
         """
+        excluded = set(exclude_book_ids or [])
         if not self.is_fitted:
             self.fit()
 
@@ -79,7 +81,7 @@ class ContentBasedRecommender:
             target = self.repo.get_book_by_id(book_id)
             if not target:
                 return []
-            sim_ids = target.get("similar_books", [])
+            sim_ids = [b for b in target.get("similar_books", []) if b not in excluded]
             sim_books = self.repo.get_books_by_ids(sim_ids[:limit])
             return [
                 {
@@ -108,6 +110,8 @@ class ContentBasedRecommender:
         candidates = []
         for idx in ranked_indices:
             cid = self.book_ids[idx]
+            if cid in excluded:
+                continue
             sim_score = float(similarities[idx])
             cand_book = self.repo.get_book_by_id(cid)
             if not cand_book:

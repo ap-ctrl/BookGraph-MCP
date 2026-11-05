@@ -20,6 +20,12 @@ REQUIRED_BOOK_FILES = [
     "goodreads_reviews_romance.json.gz",
 ]
 
+SAMPLE_BOOK_FILES = [
+    "sample_goodreads_books_romance.json.gz",
+    "sample_goodreads_interactions_romance.json.gz",
+    "sample_goodreads_reviews_romance.json.gz",
+]
+
 class DatasetManager:
     """Manages raw dataset acquisition, streaming ingestion, and development sampling."""
 
@@ -28,6 +34,11 @@ class DatasetManager:
         self.processed_dir = processed_dir or settings.processed_data_dir
         self.raw_dir.mkdir(parents=True, exist_ok=True)
         self.processed_dir.mkdir(parents=True, exist_ok=True)
+        self.streaming_stats: Dict[str, Any] = {
+            "lines_read": 0,
+            "records_parsed": 0,
+            "malformed_lines": 0,
+        }
 
     @staticmethod
     def get_download_instructions() -> str:
@@ -42,10 +53,15 @@ Source Attribution:
   Dataset Portal: {UCSD_DOWNLOADS}
 
 Terms of Use:
-  - strictly for academic research and personal educational use.
+  - Strictly for academic research and personal educational use.
   - Commercial use, public redistribution, and direct scraping are strictly prohibited.
 
-Download Links (Romance subset):
+Published Dataset Statistics (Wan & McAuley, 2018):
+  - Books:                 335,449
+  - Reader Interactions:   42,792,856
+  - Reviews:               3,565,378
+
+Required Raw Files (Romance subset):
   1. Books:        goodreads_books_romance.json.gz (approx 120MB compressed)
   2. Interactions: goodreads_interactions_romance.json.gz (approx 1.2GB compressed)
   3. Reviews:      goodreads_reviews_romance.json.gz (approx 1.5GB compressed)
@@ -65,33 +81,101 @@ Instructions:
             status[filename] = filepath.exists() and filepath.stat().st_size > 0
         return status
 
+    def check_sample_files(self) -> Dict[str, bool]:
+        """Check whether sample development files are present."""
+        status = {}
+        for filename in SAMPLE_BOOK_FILES:
+            filepath = self.raw_dir / filename
+            status[filename] = filepath.exists() and filepath.stat().st_size > 0
+        return status
+
+    def get_dataset_mode(self) -> str:
+        """
+        Determine current dataset operational mode:
+        - 'full_dataset': All 3 full UCSD raw files are present on disk.
+        - 'development_sample': Running on curated development seed fixture.
+        - 'missing': Neither full dataset nor sample files are found.
+        """
+        raw_status = self.check_raw_files()
+        if all(raw_status.values()):
+            return "full_dataset"
+        sample_status = self.check_sample_files()
+        if all(sample_status.values()):
+            return "development_sample"
+        return "missing"
+
+    def get_source_paths(self) -> Tuple[Path, Path, Path, str]:
+        """
+        Return (books_path, interactions_path, reviews_path, mode).
+        If raw datasets are absent, generates or returns development sample paths.
+        """
+        mode = self.get_dataset_mode()
+        if mode == "full_dataset":
+            return (
+                self.raw_dir / "goodreads_books_romance.json.gz",
+                self.raw_dir / "goodreads_interactions_romance.json.gz",
+                self.raw_dir / "goodreads_reviews_romance.json.gz",
+                "full_dataset",
+            )
+        # Ensure sample exists
+        if mode == "missing":
+            logger.info("Raw UCSD files not detected; initializing development sample fixture.")
+            self.create_development_sample()
+
+        return (
+            self.raw_dir / "sample_goodreads_books_romance.json.gz",
+            self.raw_dir / "sample_goodreads_interactions_romance.json.gz",
+            self.raw_dir / "sample_goodreads_reviews_romance.json.gz",
+            "development_sample",
+        )
+
     def stream_records(
         self, filepath: Path, max_records: Optional[int] = None
     ) -> Generator[Dict[str, Any], None, None]:
         """
-        Stream records one-by-one from a gzipped or plain JSON file.
+        Stream records line-by-line from a gzipped or plain JSON file.
         Memory safe: avoids loading complete 42M interaction arrays into RAM.
+        Gracefully handles malformed JSON records by logging warnings and skipping.
         """
         if not filepath.exists():
-            raise FileNotFoundError(f"File not found: {filepath}")
+            raise FileNotFoundError(
+                f"Dataset file not found: {filepath}. "
+                f"Please see download instructions:\n{self.get_download_instructions()}"
+            )
 
         is_gzipped = filepath.suffix == ".gz" or str(filepath).endswith(".json.gz")
         open_fn: Callable = gzip.open if is_gzipped else open
 
         count = 0
         with open_fn(filepath, mode="rt", encoding="utf-8", errors="replace") as f:
-            for line in f:
+            for line_no, line in enumerate(f, start=1):
+                self.streaming_stats["lines_read"] += 1
                 line_str = line.strip()
                 if not line_str:
                     continue
                 try:
                     record = json.loads(line_str)
-                    yield record
-                    count += 1
-                    if max_records and count >= max_records:
-                        break
+                    if isinstance(record, dict):
+                        self.streaming_stats["records_parsed"] += 1
+                        yield record
+                        count += 1
+                        if max_records is not None and count >= max_records:
+                            break
+                    else:
+                        self.streaming_stats["malformed_lines"] += 1
+                        logger.warning(
+                            "Skipping non-dict JSON object at line %d in %s",
+                            line_no,
+                            filepath.name,
+                        )
                 except json.JSONDecodeError as e:
-                    logger.warning("Skipping malformed JSON line in %s: %s", filepath.name, e)
+                    self.streaming_stats["malformed_lines"] += 1
+                    logger.warning(
+                        "Skipping malformed JSON line %d in %s: %s",
+                        line_no,
+                        filepath.name,
+                        e,
+                    )
                     continue
 
     def inspect_record_structure(
@@ -112,9 +196,9 @@ Instructions:
         output_reviews_path: Optional[Path] = None,
     ) -> Dict[str, int]:
         """
-        Generate a curated, authentic development dataset based on canonical romance books,
-        rich interactions, and multi-thematic reviews adhering strictly to UCSD schema format.
-        Ensures the pipeline is 100% reproducible and testable immediately.
+        Generate curated demonstration seed fixtures based on canonical romance books,
+        simulated reader interactions, and multi-thematic reviews adhering strictly to UCSD schema format.
+        Ensures the pipeline is 100% reproducible and testable without external network dependencies.
         """
         b_path = output_books_path or (self.raw_dir / "sample_goodreads_books_romance.json.gz")
         i_path = output_interactions_path or (self.raw_dir / "sample_goodreads_interactions_romance.json.gz")
@@ -138,7 +222,7 @@ Instructions:
                 f.write(json.dumps(review) + "\n")
 
         logger.info(
-            "Created development dataset: %d books, %d interactions, %d reviews",
+            "Created development dataset fixtures: %d books, %d interactions, %d reviews",
             len(CANONICAL_BOOKS),
             len(CANONICAL_INTERACTIONS),
             len(CANONICAL_REVIEWS),

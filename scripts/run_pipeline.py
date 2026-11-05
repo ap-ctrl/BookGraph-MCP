@@ -31,31 +31,27 @@ def run_pipeline() -> None:
     repo = BookRepository()
 
     # Step 2: Data Acquisition / Ingestion
-    logger.info("Step 2: Checking source datasets...")
+    logger.info("Step 2: Checking source datasets and determining operational mode...")
     dm = DatasetManager()
-    raw_status = dm.check_raw_files()
+    books_file, inter_file, rev_file, dataset_mode = dm.get_source_paths()
+    logger.info("Dataset mode established: '%s'", dataset_mode)
 
-    if all(raw_status.values()):
-        logger.info("Full UCSD raw dataset files detected. Streaming records...")
-        books_file = settings.raw_data_dir / "goodreads_books_romance.json.gz"
-        inter_file = settings.raw_data_dir / "goodreads_interactions_romance.json.gz"
-        rev_file = settings.raw_data_dir / "goodreads_reviews_romance.json.gz"
-        raw_books = list(dm.stream_records(books_file, max_records=2000))
-        raw_interactions = list(dm.stream_records(inter_file, max_records=10000))
-        raw_reviews = list(dm.stream_records(rev_file, max_records=2000))
+    if dataset_mode == "full_dataset":
+        logger.info("Streaming from full UCSD raw dataset files: %s", [f.name for f in [books_file, inter_file, rev_file]])
+        raw_books = dm.stream_records(books_file, max_records=5000)
+        raw_interactions = dm.stream_records(inter_file, max_records=25000)
+        raw_reviews = dm.stream_records(rev_file, max_records=5000)
     else:
-        logger.info("Full raw files not present in data/raw/. Generating authentic development dataset...")
-        dm.create_development_sample()
-        from ingestion.seed_data import CANONICAL_BOOKS, CANONICAL_INTERACTIONS, CANONICAL_REVIEWS
-        raw_books = CANONICAL_BOOKS
-        raw_interactions = CANONICAL_INTERACTIONS
-        raw_reviews = CANONICAL_REVIEWS
+        logger.info("Full UCSD files not detected locally; streaming from curated development fixture (%s)", books_file.name)
+        raw_books = dm.stream_records(books_file)
+        raw_interactions = dm.stream_records(inter_file)
+        raw_reviews = dm.stream_records(rev_file)
 
     # Step 3: Data Preprocessing & Validation
     logger.info("Step 3: Preprocessing and validating datasets...")
     preprocessor = DataPreprocessor()
     books_df, interactions_df, reviews_df = preprocessor.process_all(
-        raw_books, raw_interactions, raw_reviews
+        raw_books, raw_interactions, raw_reviews, dataset_mode=dataset_mode
     )
 
     # Insert into database

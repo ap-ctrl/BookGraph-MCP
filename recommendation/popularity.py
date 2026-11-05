@@ -23,17 +23,26 @@ class PopularityRecommender:
         limit: int = 10,
         min_ratings: int = 100,
         genre: Optional[str] = None,
+        exclude_book_ids: Optional[Any] = None,
     ) -> List[Dict[str, Any]]:
-        """Return top ranked books by Bayesian shrinkage."""
-        books = self.repo.get_top_popular_books(limit=limit * 2, min_ratings=min_ratings)
+        """Return top ranked books by Bayesian shrinkage, optionally filtering excluded books."""
+        excluded = set(exclude_book_ids or [])
+        fetch_limit = limit * 3 + len(excluded)
+        books = self.repo.get_top_popular_books(limit=fetch_limit, min_ratings=min_ratings)
+
+        # Fallback if strict min_ratings yields fewer books than limit
+        if len(books) < limit and min_ratings > 0:
+            books = self.repo.get_top_popular_books(limit=fetch_limit, min_ratings=0)
 
         if genre:
             genre_lower = genre.lower()
-            filtered = [
+            books = [
                 b for b in books
                 if any(genre_lower in g.lower() for g in b.get("genres", []))
             ]
-            books = filtered
+
+        if excluded:
+            books = [b for b in books if b["book_id"] not in excluded]
 
         results = []
         for rank, b in enumerate(books[:limit], start=1):

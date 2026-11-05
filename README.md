@@ -92,7 +92,7 @@ flowchart TD
 
 ## 2. Key Capabilities & Innovations
 
-- **Zero-Hallucination Grounding**: The AI assistant never fabricates book titles, tropes, or review quotes. Every recommendation cites a real Goodreads record, mathematical similarity score, and verbatim textual evidence.
+- **Grounded Recommendations**: The AI assistant ensures that all book titles, tropes, and review excerpts are sourced from the dataset. Recommendations include citations to actual records and provide similarity scores and evidential excerpts.
 - **Protocol Hygiene**: When running over STDIO, `sys.stdout` is strictly reserved for pure JSON-RPC 2.0 protocol packets. All operational logging is safely directed to `sys.stderr` to prevent stream corruption.
 - **Memory Discipline**: Avoids loading multi-million-row interaction matrices into dense RAM. Uses `scipy.sparse.csr_matrix` for item-item collaborative filtering and chunked generators for streaming dataset ingestion.
 - **Cold-Start Resilience**: The recommendation engine gracefully detects when a reader has sparse or no history (< 2 ratings), providing informative diagnostic messages and smoothly falling back to content-based or Bayesian popularity ranking.

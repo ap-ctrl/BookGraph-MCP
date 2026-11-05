@@ -244,7 +244,14 @@ class RomanceTropeExtractor:
                         matched_sentences.append(sent)
 
             if matches:
-                confidence = min(0.95, 0.70 + (len(matches) * 0.08))
+                # Calibrate confidence based on match count
+                if len(matches) == 1:
+                    confidence = 0.65
+                elif len(matches) == 2:
+                    confidence = 0.78
+                else:
+                    confidence = min(0.92, 0.78 + (len(matches) - 2) * 0.05)
+
                 evidence = " | ".join(matched_sentences) if matched_sentences else f"Matched keywords: {', '.join(matches[:3])}"
                 extracted[trope_name] = {
                     "trope_name": trope_name,
@@ -253,30 +260,46 @@ class RomanceTropeExtractor:
                     "evidence": evidence[:400],
                 }
 
-        # 2. TF-IDF Similarity Candidate Matching
+        # 2. TF-IDF Similarity Candidate Matching with Sentence-Level Traceability
         if text.strip():
             desc_vec = self.vectorizer.transform([text])
             sims = cosine_similarity(desc_vec, self.prototype_matrix)[0]
 
+            # Candidate sentences for evidence extraction
+            candidate_sentences = [
+                s.strip() for s in re.split(r"(?<=[.!?])\s+", text) if len(s.strip()) > 15
+            ]
+
             for idx, trope_name in enumerate(self.trope_names):
                 sim_score = float(sims[idx])
                 if sim_score >= self.similarity_threshold:
+                    # Find highest scoring sentence against trope prototype
+                    best_sent = ""
+                    if candidate_sentences:
+                        sent_vecs = self.vectorizer.transform(candidate_sentences)
+                        sent_sims = cosine_similarity(sent_vecs, self.prototype_matrix[idx]).flatten()
+                        best_idx = int(np.argmax(sent_sims))
+                        if sent_sims[best_idx] > 0.10:
+                            best_sent = candidate_sentences[best_idx]
+
                     if trope_name in extracted:
                         # Hybrid detection: boost confidence
                         extracted[trope_name]["method"] = "hybrid"
                         extracted[trope_name]["confidence"] = min(
-                            0.99, round(extracted[trope_name]["confidence"] * 0.7 + sim_score * 0.3, 2)
+                            0.95, round(extracted[trope_name]["confidence"] * 0.7 + sim_score * 0.3, 2)
                         )
-                        extracted[trope_name]["evidence"] += f" (TF-IDF Similarity: {sim_score:.2f})"
+                        extracted[trope_name]["evidence"] += f" [Prototype similarity: {sim_score:.2f}]"
                     else:
-                        # Extract most relevant sentence as evidence
-                        sentences = re.split(r"(?<=[.!?])\s+", text)
-                        best_sent = sentences[0] if sentences else text[:200]
+                        evidence_str = (
+                            f'Contextual alignment ({sim_score:.2f}): "{best_sent[:250]}"'
+                            if best_sent
+                            else f"Global description prototype cosine similarity: {sim_score:.2f}"
+                        )
                         extracted[trope_name] = {
                             "trope_name": trope_name,
                             "confidence": round(sim_score, 2),
                             "method": "tfidf_matcher",
-                            "evidence": f"Contextual TF-IDF alignment ({sim_score:.2f}): \"{best_sent[:250]}\"",
+                            "evidence": evidence_str,
                         }
 
         # Sort by confidence descending

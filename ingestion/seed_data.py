@@ -1,6 +1,43 @@
-"""Curated, high-fidelity romance seed dataset adhering to UCSD Book Graph schema."""
+"""Curated, high-fidelity romance seed dataset adhering to UCSD Book Graph schema.
+
+PROVENANCE NOTICE:
+This module contains curated and synthetic demonstration fixtures designed for
+testing, CI/CD, and local development. It is distinct from the 2017 UCSD Goodreads
+Romance Research Dataset (Wan & McAuley, RecSys 2018).
+- Books: Curated demonstration records reflecting real Goodreads catalog entries (real Goodreads IDs,
+  titles, authors, and public shelf tags). Notably, titles such as 'The Love Hypothesis' (2021) and
+  'Book Lovers' (2022) were published after the 2017 UCSD crawl and were curated specifically for
+  demonstration and testing.
+- Interactions: 100% synthetic reader profiles created to test collaborative filtering and persona modeling.
+- Reviews: 100% synthetic review texts authored to validate sentiment analysis and theme extraction.
+"""
 
 from typing import Any, Dict, List
+
+PROVENANCE_METADATA: Dict[str, Any] = {
+    "dataset_class": "development_seed_fixture",
+    "description": (
+        "Curated demonstration fixtures adhering to the UCSD Book Graph schema format. "
+        "Books consist of curated popular romance titles with public Goodreads metadata. "
+        "Interactions and reviews are synthetic test fixtures created for unit testing, "
+        "recommendation benchmarking, and MCP tool verification. "
+        "This dataset is distinct from the published 2017 UCSD Goodreads Romance dataset."
+    ),
+    "provenance_types": {
+        "books": "curated_demonstration_metadata",
+        "interactions": "synthetic_demonstration_interaction",
+        "reviews": "synthetic_demonstration_review",
+    },
+    "ucsd_reference_dataset": {
+        "source": "UCSD Book Graph (Mengting Wan, Julian McAuley, RecSys 2018)",
+        "source_url": "https://sites.google.com/eng.ucsd.edu/ucsdbookgraph/home",
+        "published_statistics": {
+            "books": 335449,
+            "interactions": 42792856,
+            "reviews": 3565378,
+        },
+    },
+}
 
 CANONICAL_BOOKS: List[Dict[str, Any]] = [
     {

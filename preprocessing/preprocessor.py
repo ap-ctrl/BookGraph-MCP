@@ -2,9 +2,10 @@
 
 import json
 import re
-from datetime import datetime
+import time
+from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Set, Tuple
+from typing import Any, Dict, Iterable, List, Optional, Set, Tuple
 
 import numpy as np
 import pandas as pd
@@ -32,8 +33,10 @@ class DataPreprocessor:
         self.processed_dir = processed_dir or settings.processed_data_dir
         self.processed_dir.mkdir(parents=True, exist_ok=True)
         self.validation_stats: Dict[str, Any] = {
-            "timestamp": datetime.utcnow().isoformat(),
-            "books": {"input": 0, "output": 0, "missing_desc": 0, "missing_year": 0, "failures": 0},
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "dataset_mode": "development_sample",
+            "processing_time_seconds": 0.0,
+            "books": {"input": 0, "output": 0, "missing_desc": 0, "missing_year": 0, "duplicates": 0, "failures": 0},
             "interactions": {"input": 0, "output": 0, "duplicates": 0, "invalid_book_ref": 0, "failures": 0},
             "reviews": {"input": 0, "output": 0, "empty_text": 0, "invalid_book_ref": 0, "duplicates": 0, "failures": 0},
         }
@@ -253,17 +256,24 @@ class DataPreprocessor:
 
     def process_all(
         self,
-        raw_books: List[Dict[str, Any]],
-        raw_interactions: List[Dict[str, Any]],
-        raw_reviews: List[Dict[str, Any]],
+        raw_books: Iterable[Dict[str, Any]],
+        raw_interactions: Iterable[Dict[str, Any]],
+        raw_reviews: Iterable[Dict[str, Any]],
+        dataset_mode: str = "development_sample",
     ) -> Tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
         """Process books, interactions, and reviews and return clean DataFrames."""
+        start_time = time.time()
+        self.validation_stats["dataset_mode"] = dataset_mode
+
         # 1. Clean Books
         cleaned_books = []
         seen_books = set()
         for b in raw_books:
             c = self.clean_book_record(b)
-            if c and c["book_id"] not in seen_books:
+            if c:
+                if c["book_id"] in seen_books:
+                    self.validation_stats["books"]["duplicates"] += 1
+                    continue
                 seen_books.add(c["book_id"])
                 cleaned_books.append(c)
 
@@ -302,54 +312,88 @@ class DataPreprocessor:
 
         reviews_df = pd.DataFrame(cleaned_reviews)
 
+        # Calculate processing duration
+        self.validation_stats["processing_time_seconds"] = round(time.time() - start_time, 3)
+
         # Save to Parquet
         books_df.to_parquet(self.processed_dir / "processed_books.parquet", index=False)
         interactions_df.to_parquet(self.processed_dir / "processed_interactions.parquet", index=False)
         reviews_df.to_parquet(self.processed_dir / "processed_reviews.parquet", index=False)
 
-        # Generate validation report
+        # Generate validation report and data dictionary
         self.generate_validation_report()
         self.generate_data_dictionary()
 
         return books_df, interactions_df, reviews_df
 
     def generate_validation_report(self) -> Path:
-        """Write a comprehensive data validation report markdown document."""
+        """Write a comprehensive data validation report markdown document based on actual execution."""
         report_path = settings.reports_dir / "data_validation_report.md"
         stats = self.validation_stats
+        mode = stats.get("dataset_mode", "development_sample")
+        duration = stats.get("processing_time_seconds", 0.0)
 
         content = f"""# Romance Reader Intelligence: Data Validation Report
 
-Generated: {stats['timestamp']}
-Environment: Python 3.13 / UCSD Goodreads Romance Graph Pipeline
+**Generated:** {stats['timestamp']}  
+**Execution Environment:** Python 3.13 / UCSD Goodreads Romance Graph Pipeline  
+**Dataset Operational Mode:** `{mode}`  
+**Processing Duration:** {duration:.3f} seconds  
 
-## Summary Statistics
+---
 
-| Dataset | Input Records | Cleaned Output | Missing Fields | Duplicates Filtered | Invalid Foreign Keys | Failures |
+## 1. Provenance & Dataset Classification
+
+- **Operational Mode:** `{mode}`
+- **Source Classification:** {"Curated demonstration seed fixture with synthetic reader interaction traces." if mode == "development_sample" else "Full UCSD Goodreads Romance dataset (Wan & McAuley, 2018)."}
+- **Integrity Rule:** Seed dataset record counts originate strictly from pipeline execution and must not be conflated with the published 335,449-book UCSD research dataset.
+
+---
+
+## 2. Summary Validation Statistics
+
+| Dataset | Input Records | Cleaned Output | Invalid Records | Duplicates Filtered | Missing Fields | Invalid Foreign Keys |
 |---|---|---|---|---|---|---|
-| **Books** | {stats['books']['input']} | {stats['books']['output']} | Desc: {stats['books']['missing_desc']}, Year: {stats['books']['missing_year']} | 0 | N/A | {stats['books']['failures']} |
-| **Interactions** | {stats['interactions']['input']} | {stats['interactions']['output']} | 0 | {stats['interactions']['duplicates']} | {stats['interactions']['invalid_book_ref']} | {stats['interactions']['failures']} |
-| **Reviews** | {stats['reviews']['input']} | {stats['reviews']['output']} | Empty Text: {stats['reviews']['empty_text']} | {stats['reviews']['duplicates']} | {stats['reviews']['invalid_book_ref']} | {stats['reviews']['failures']} |
+| **Books** | {stats['books']['input']} | {stats['books']['output']} | {stats['books']['failures']} | {stats['books']['duplicates']} | Desc: {stats['books']['missing_desc']}, Year: {stats['books']['missing_year']} | N/A |
+| **Interactions** | {stats['interactions']['input']} | {stats['interactions']['output']} | {stats['interactions']['failures']} | {stats['interactions']['duplicates']} | 0 | {stats['interactions']['invalid_book_ref']} |
+| **Reviews** | {stats['reviews']['input']} | {stats['reviews']['output']} | {stats['reviews']['failures']} | {stats['reviews']['duplicates']} | Empty Text: {stats['reviews']['empty_text']} | {stats['reviews']['invalid_book_ref']} |
 
-## Validation Rules Applied
+---
+
+## 3. Detailed Metric Descriptions
+
+| Metric | Pipeline Description | Actual Value |
+|---|---|---|
+| **Input Records** | Total records read from raw source files or seed collections | Books: {stats['books']['input']}, Interactions: {stats['interactions']['input']}, Reviews: {stats['reviews']['input']} |
+| **Processed Records** | Successfully validated and cleaned records persisted to Parquet/SQLite | Books: {stats['books']['output']}, Interactions: {stats['interactions']['output']}, Reviews: {stats['reviews']['output']} |
+| **Invalid Records** | Records rejected due to missing primary identifiers or fatal parse errors | Books: {stats['books']['failures']}, Interactions: {stats['interactions']['failures']}, Reviews: {stats['reviews']['failures']} |
+| **Duplicate Records** | Duplicate entities discarded (duplicate `book_id`, `(user_id, book_id)`, or `review_id`) | Books: {stats['books']['duplicates']}, Interactions: {stats['interactions']['duplicates']}, Reviews: {stats['reviews']['duplicates']} |
+| **Missing Fields** | Optional attributes missing or defaulted (e.g. publication year, empty review text) | Books (Desc/Year): {stats['books']['missing_desc']}/{stats['books']['missing_year']}, Reviews (Empty): {stats['reviews']['empty_text']} |
+| **Invalid Foreign Keys** | Reader interactions or reviews pointing to unindexed `book_id` references | Interactions: {stats['interactions']['invalid_book_ref']}, Reviews: {stats['reviews']['invalid_book_ref']} |
+| **Processing Time** | Total wall-clock time elapsed for validation, cleaning, and Parquet serialization | {duration:.3f} seconds |
+| **Dataset Mode** | Active execution mode | `{mode}` |
+
+---
+
+## 4. Referential & Structural Integrity Verification
 
 1. **Books Pipeline**:
-   - `book_id` must be non-empty string.
-   - Text fields (`title`, `description`) stripped of HTML tags and normalized.
-   - Ratings clamped to range `[0.0, 5.0]`.
-   - Shelf tags mapped to canonical romance subgenres (`Contemporary Romance`, `Historical Romance`, `Fantasy Romance / Romantasy`, etc.).
-   - Bayesian weighted shrinkage rating computed via $WR = \\frac{{v}}{{v+m}}R + \\frac{{m}}{{v+m}}C$.
+   - `book_id` must be a non-empty string.
+   - Text fields (`title`, `description`) are stripped of HTML tags and normalized.
+   - Reader ratings are clamped to the valid domain `[0.0, 5.0]`.
+   - Shelf tags are categorized into standard romance subgenres.
+   - Bayesian weighted shrinkage ratings are computed dynamically via $WR = \\frac{{v}}{{v+m}}R + \\frac{{m}}{{v+m}}C$.
 
 2. **Interactions Pipeline**:
-   - Both `user_id` and `book_id` validated.
-   - Foreign key integrity checked: interaction book IDs must exist in the clean book catalogue.
-   - Exact `(user_id, book_id)` duplicates removed.
-   - Ratings constrained to valid integer domain `[0, 5]`.
+   - Both `user_id` and `book_id` must be present.
+   - Strict foreign key integrity: interaction `book_id` must resolve against the verified book catalogue.
+   - Exact `(user_id, book_id)` duplicates are pruned.
+   - Star ratings are constrained to integers `[0, 5]`.
 
 3. **Reviews Pipeline**:
-   - Review IDs must be distinct.
-   - Foreign key integrity strictly enforced against valid book catalogue.
-   - Reviews with empty or whitespace-only bodies discarded.
+   - `review_id` must be unique across all records.
+   - Foreign key integrity is strictly enforced against the cleaned book catalogue.
+   - Reviews with empty or whitespace-only bodies are discarded.
 """
         with open(report_path, "w", encoding="utf-8") as f:
             f.write(content)

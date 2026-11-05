@@ -34,26 +34,37 @@ class HybridRecommender:
         favorite_genres: Optional[List[str]] = None,
         desired_tropes: Optional[List[str]] = None,
         limit: int = 5,
+        user_history: Optional[List[Dict[str, Any]]] = None,
+        exclude_book_ids: Optional[Any] = None,
     ) -> Dict[str, Any]:
         """
         Generate recommendations for a dataset reader ID or preference profile.
         Handles cold-start cases explicitly.
+        Accepts explicit user_history to avoid DB queries and test-set data leakage during evaluation.
         """
         is_cold_start = False
         cold_start_reason = ""
-        user_history = []
 
-        if user_id:
+        if user_history is None and user_id:
             user_history = self.repo.get_interactions_for_user(user_id)
+        elif user_history is None:
+            user_history = []
+
+        already_read = set(exclude_book_ids or []) | {
+            h["book_id"] for h in user_history if h.get("is_read", 1) or h.get("rating", 0) > 0
+        }
 
         # Case 1: Known reader with collaborative history
         if user_id and len(user_history) >= 2:
             collab_recs, cold = self.collab_recommender.recommend_for_user(user_id, limit=limit * 2)
             if not cold and collab_recs:
                 # Augment with content signals from user's top-rated book
-                top_book = max(user_history, key=lambda x: x["rating"])
+                top_book = max(user_history, key=lambda x: x.get("rating", 0))
                 content_recs = self.content_recommender.recommend_similar(
-                    top_book["book_id"], limit=limit * 2, target_tropes=desired_tropes
+                    top_book["book_id"],
+                    limit=limit * 2,
+                    target_tropes=desired_tropes,
+                    exclude_book_ids=already_read,
                 )
 
                 # Merge scores
@@ -63,6 +74,8 @@ class HybridRecommender:
 
                 for r in collab_recs:
                     bid = r["book_id"]
+                    if bid in already_read:
+                        continue
                     norm_collab = r["predicted_rating"] / collab_max
                     scores[bid] = {
                         "book_id": bid,
@@ -75,6 +88,8 @@ class HybridRecommender:
 
                 for r in content_recs:
                     bid = r["book_id"]
+                    if bid in already_read:
+                        continue
                     if bid in scores:
                         scores[bid]["content_score"] = r["similarity_score"]
                         scores[bid]["explanation"] += f" Also {r['explanation']}"
@@ -132,8 +147,10 @@ class HybridRecommender:
         # Fallback to trope/genre matching or popularity baseline
         recs = []
         if desired_tropes:
-            trope_books = self.repo.find_books_by_tropes(desired_tropes, limit=limit)
+            trope_books = self.repo.find_books_by_tropes(desired_tropes, limit=limit * 2)
             for b in trope_books:
+                if b["book_id"] in already_read:
+                    continue
                 recs.append({
                     "book_id": b["book_id"],
                     "title": b["title"],
@@ -147,10 +164,14 @@ class HybridRecommender:
                         f"and high Bayesian rating ({b['bayesian_rating']:.2f})."
                     ),
                 })
+                if len(recs) >= limit:
+                    break
         elif favorite_genres:
             genre_name = favorite_genres[0]
-            books, _ = self.repo.search_books(genre=genre_name, limit=limit)
+            books, _ = self.repo.search_books(genre=genre_name, limit=limit * 2)
             for b in books:
+                if b["book_id"] in already_read:
+                    continue
                 recs.append({
                     "book_id": b["book_id"],
                     "title": b["title"],
@@ -160,9 +181,11 @@ class HybridRecommender:
                     "genres": b.get("genres", []),
                     "explanation": f"Top ranked {genre_name} book by reader acclaim ({b['bayesian_rating']:.2f}).",
                 })
+                if len(recs) >= limit:
+                    break
         else:
             # Popularity baseline fallback
-            pop_books = self.popularity_recommender.recommend(limit=limit)
+            pop_books = self.popularity_recommender.recommend(limit=limit, exclude_book_ids=already_read)
             recs = [
                 {
                     "book_id": b["book_id"],

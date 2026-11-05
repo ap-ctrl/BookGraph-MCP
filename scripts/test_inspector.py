@@ -12,12 +12,12 @@ def run_inspector_test() -> None:
     print("================================================================================")
 
     server_process = subprocess.Popen(
-        [sys.executable, "server.py", "--transport", "stdio"],
+        [sys.executable, "-u", "server.py", "--transport", "stdio"],
         stdin=subprocess.PIPE,
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
         text=True,
-        bufsize=0,
+        bufsize=1,
     )
 
     try:

@@ -375,7 +375,15 @@ class BookRepository:
             cur.execute("SELECT AVG(average_rating) as avg_r, MIN(publication_year) as min_y, MAX(publication_year) as max_y FROM books;")
             agg = cur.fetchone()
 
+        mode = "full_dataset" if total_books > 100 else "development_sample"
+        provenance = (
+            "UCSD Goodreads Book Graph (Romance Subset, Wan & McAuley, RecSys 2018)"
+            if mode == "full_dataset"
+            else "Curated Romance Seed Fixture (Development/Testing Mode)"
+        )
+
         return {
+            "dataset_mode": mode,
             "total_books": total_books,
             "total_authors": total_authors,
             "total_readers": total_readers,
@@ -384,7 +392,7 @@ class BookRepository:
             "total_trope_classifications": total_trope_links,
             "catalog_average_rating": round(agg["avg_r"] or 0.0, 2),
             "publication_year_range": {"min": agg["min_y"], "max": agg["max_y"]},
-            "dataset_provenance": "UCSD Goodreads Book Graph (Romance Subset, Wan & McAuley)",
+            "dataset_provenance": provenance,
         }
 
     def get_genre_distribution(self) -> Dict[str, int]:
@@ -431,11 +439,14 @@ class BookRepository:
     # =========================================================================
 
     def insert_or_replace_books(self, records: List[Dict[str, Any]]) -> int:
-        """Insert or replace book records in batch."""
+        """
+        Upsert book records using ON CONFLICT DO UPDATE.
+        Preserves existing child foreign keys in interactions, reviews, tropes, and themes.
+        """
         if not records:
             return 0
         sql = """
-            INSERT OR REPLACE INTO books (
+            INSERT INTO books (
                 book_id, title, title_without_series, author_name, author_id,
                 average_rating, ratings_count, text_reviews_count, publication_year,
                 publisher, num_pages, description, genres, popular_shelves,
@@ -445,7 +456,25 @@ class BookRepository:
                 :average_rating, :ratings_count, :text_reviews_count, :publication_year,
                 :publisher, :num_pages, :description, :genres, :popular_shelves,
                 :similar_books, :url, :image_url, :bayesian_rating
-            );
+            )
+            ON CONFLICT(book_id) DO UPDATE SET
+                title = excluded.title,
+                title_without_series = excluded.title_without_series,
+                author_name = excluded.author_name,
+                author_id = excluded.author_id,
+                average_rating = excluded.average_rating,
+                ratings_count = excluded.ratings_count,
+                text_reviews_count = excluded.text_reviews_count,
+                publication_year = excluded.publication_year,
+                publisher = excluded.publisher,
+                num_pages = excluded.num_pages,
+                description = excluded.description,
+                genres = excluded.genres,
+                popular_shelves = excluded.popular_shelves,
+                similar_books = excluded.similar_books,
+                url = excluded.url,
+                image_url = excluded.image_url,
+                bayesian_rating = excluded.bayesian_rating;
         """
         with get_db_connection(self.db_path) as conn:
             cur = conn.cursor()
@@ -453,15 +482,20 @@ class BookRepository:
         return len(records)
 
     def insert_or_replace_interactions(self, records: List[Dict[str, Any]]) -> int:
-        """Insert or replace interaction records in batch."""
+        """Upsert interaction records in batch."""
         if not records:
             return 0
         sql = """
-            INSERT OR REPLACE INTO interactions (
+            INSERT INTO interactions (
                 user_id, book_id, rating, is_read, date_added, read_at
             ) VALUES (
                 :user_id, :book_id, :rating, :is_read, :date_added, :read_at
-            );
+            )
+            ON CONFLICT(user_id, book_id) DO UPDATE SET
+                rating = excluded.rating,
+                is_read = excluded.is_read,
+                date_added = excluded.date_added,
+                read_at = excluded.read_at;
         """
         with get_db_connection(self.db_path) as conn:
             cur = conn.cursor()
@@ -469,31 +503,56 @@ class BookRepository:
         return len(records)
 
     def insert_or_replace_reviews(self, records: List[Dict[str, Any]]) -> int:
-        """Insert or replace review records in batch."""
+        """Upsert review records in batch."""
         if not records:
             return 0
+        prepared = [
+            {
+                "review_id": r.get("review_id"),
+                "user_id": r.get("user_id"),
+                "book_id": r.get("book_id"),
+                "rating": r.get("rating", 0),
+                "review_text": r.get("review_text", ""),
+                "sentiment_score": r.get("sentiment_score"),
+                "sentiment_label": r.get("sentiment_label"),
+                "date_added": r.get("date_added", ""),
+            }
+            for r in records
+        ]
         sql = """
-            INSERT OR REPLACE INTO reviews (
+            INSERT INTO reviews (
                 review_id, user_id, book_id, rating, review_text, sentiment_score, sentiment_label, date_added
             ) VALUES (
                 :review_id, :user_id, :book_id, :rating, :review_text, :sentiment_score, :sentiment_label, :date_added
-            );
+            )
+            ON CONFLICT(review_id) DO UPDATE SET
+                user_id = excluded.user_id,
+                book_id = excluded.book_id,
+                rating = excluded.rating,
+                review_text = excluded.review_text,
+                sentiment_score = excluded.sentiment_score,
+                sentiment_label = excluded.sentiment_label,
+                date_added = excluded.date_added;
         """
         with get_db_connection(self.db_path) as conn:
             cur = conn.cursor()
-            cur.executemany(sql, records)
+            cur.executemany(sql, prepared)
         return len(records)
 
     def insert_or_replace_tropes(self, records: List[Dict[str, Any]]) -> int:
-        """Insert or replace trope records in batch."""
+        """Upsert trope records in batch."""
         if not records:
             return 0
         sql = """
-            INSERT OR REPLACE INTO tropes (
+            INSERT INTO tropes (
                 book_id, trope_name, confidence, method, evidence
             ) VALUES (
                 :book_id, :trope_name, :confidence, :method, :evidence
-            );
+            )
+            ON CONFLICT(book_id, trope_name) DO UPDATE SET
+                confidence = excluded.confidence,
+                method = excluded.method,
+                evidence = excluded.evidence;
         """
         with get_db_connection(self.db_path) as conn:
             cur = conn.cursor()
