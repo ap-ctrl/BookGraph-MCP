@@ -1,9 +1,9 @@
 # Romance Reader Intelligence: Data Validation Report
 
-**Generated:** 2026-11-05T10:24:05.178343+00:00  
+**Generated:** 2026-11-06T18:50:05.771653+00:00  
 **Execution Environment:** Python 3.13 / UCSD Goodreads Romance Graph Pipeline  
 **Dataset Operational Mode:** `development_sample`  
-**Processing Duration:** 0.018 seconds  
+**Processing Duration:** 0.084 seconds  
 
 ---
 
@@ -35,7 +35,7 @@
 | **Duplicate Records** | Duplicate entities discarded (duplicate `book_id`, `(user_id, book_id)`, or `review_id`) | Books: 0, Interactions: 0, Reviews: 0 |
 | **Missing Fields** | Optional attributes missing or defaulted (e.g. publication year, empty review text) | Books (Desc/Year): 0/0, Reviews (Empty): 0 |
 | **Invalid Foreign Keys** | Reader interactions or reviews pointing to unindexed `book_id` references | Interactions: 0, Reviews: 0 |
-| **Processing Time** | Total wall-clock time elapsed for validation, cleaning, and Parquet serialization | 0.018 seconds |
+| **Processing Time** | Total wall-clock time elapsed for validation, cleaning, and Parquet serialization | 0.084 seconds |
 | **Dataset Mode** | Active execution mode | `development_sample` |
 
 ---
