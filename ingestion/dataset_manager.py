@@ -90,18 +90,32 @@ Instructions:
         return status
 
     def get_dataset_mode(self) -> str:
+        """Determine dataset mode respecting configuration.
+
+        Configurable modes (via settings.dataset_mode):
+        - "development_sample": explicitly use the curated sample fixture.
+        - "full_dataset": explicitly use the full UCSD dataset.
+        - "auto": automatic detection; sample takes priority when both exist.
         """
-        Determine current dataset operational mode:
-        - 'full_dataset': All 3 full UCSD raw files are present on disk.
-        - 'development_sample': Running on curated development seed fixture.
-        - 'missing': Neither full dataset nor sample files are found.
-        """
-        raw_status = self.check_raw_files()
-        if all(raw_status.values()):
-            return "full_dataset"
-        sample_status = self.check_sample_files()
-        if all(sample_status.values()):
+        mode_cfg = getattr(settings, "dataset_mode", "auto").lower()
+        if mode_cfg == "development_sample":
+            if all(self.check_sample_files().values()):
+                logger.info("Dataset mode configured as 'development_sample' and files are present.")
+                return "development_sample"
+            raise FileNotFoundError("Configured dataset mode 'development_sample' but sample files are missing.")
+        if mode_cfg == "full_dataset":
+            if all(self.check_raw_files().values()):
+                logger.info("Dataset mode configured as 'full_dataset' and files are present.")
+                return "full_dataset"
+            raise FileNotFoundError("Configured dataset mode 'full_dataset' but raw files are missing.")
+        # auto detection
+        if all(self.check_sample_files().values()):
+            logger.info("Auto dataset mode selected: development_sample (sample files found).")
             return "development_sample"
+        if all(self.check_raw_files().values()):
+            logger.info("Auto dataset mode selected: full_dataset (raw files found).")
+            return "full_dataset"
+        logger.info("Dataset mode auto-detected as 'missing'. No dataset files available.")
         return "missing"
 
     def get_source_paths(self) -> Tuple[Path, Path, Path, str]:

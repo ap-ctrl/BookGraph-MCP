@@ -3,10 +3,10 @@
 [![Python 3.11+](https://img.shields.io/badge/python-3.11%20%7C%203.12%20%7C%203.13-blue.svg)](https://www.python.org/)
 [![MCP SDK v2](https://img.shields.io/badge/MCP%20SDK-v2.3.0-orange.svg)](https://py.sdk.modelcontextprotocol.io/)
 [![License: Academic Research](https://img.shields.io/badge/License-Academic%20Research-lightgrey.svg)](https://sites.google.com/eng.ucsd.edu/ucsdbookgraph/home)
-[![Tests: 21 Passed](https://img.shields.io/badge/Tests-21%20Passed-brightgreen.svg)](#9-testing--verification)
+[![Tests: 37 Passed](https://img.shields.io/badge/Tests-37%20Passed-brightgreen.svg)](#10-testing--verification)
 [![Code Style: Modular](https://img.shields.io/badge/Architecture-Modular%20Service%20Layer-brightgreen.svg)](#1-system-architecture)
 
-**Romance Reader Intelligence** is a production-grade, modular Model Context Protocol (MCP) server built with Python 3.13 and the official **MCP Python SDK v2** (`mcp.server.mcpserver.MCPServer`). 
+**Romance Reader Intelligence** is a modular Model Context Protocol (MCP) server built with Python 3.13 and the official **MCP Python SDK v2** (`mcp.server.mcpserver.MCPServer`).
 
 Rather than a conventional website with AI added as an afterthought, this project is built from the protocol layer up to expose book discovery, romance trope intelligence, content-collaborative hybrid recommendations, reader interaction analytics, and sentiment-thematic review mining directly to compatible AI hosts—including **Cline in VS Code**, **Claude Desktop**, **ChatGPT Desktop**, **Cursor**, and **Antigravity**.
 

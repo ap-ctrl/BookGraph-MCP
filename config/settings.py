@@ -42,6 +42,7 @@ class Settings(BaseModel):
     llm_provider: str = os.getenv("LLM_PROVIDER", "none")
     llm_api_key: str = os.getenv("LLM_API_KEY", "")
     llm_model: str = os.getenv("LLM_MODEL", "")
+    dataset_mode: str = os.getenv("DATASET_MODE", "auto")  # auto | development_sample | full_dataset
 
     def ensure_directories(self) -> None:
         """Create necessary directories if they do not exist."""

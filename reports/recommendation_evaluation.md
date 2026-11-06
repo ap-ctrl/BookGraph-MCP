@@ -1,6 +1,6 @@
 # Romance Reader Intelligence: Recommendation Engine Evaluation
 
-**Evaluation Timestamp:** 2026-11-06T18:50:14.216468+00:00  
+**Evaluation Timestamp:** 2026-11-06T19:10:43.285662+00:00  
 **Dataset Operational Mode:** `development_sample`  
 **Random Split Seed:** `42`  
 **Train/Test Split Strategy:** User-aware holdout (25% holdout per user with $\ge 3$ interactions)  
