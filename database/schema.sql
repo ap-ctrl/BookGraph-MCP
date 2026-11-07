@@ -93,6 +93,7 @@ CREATE INDEX IF NOT EXISTS idx_themes_type ON review_themes(theme_type);
 CREATE TABLE IF NOT EXISTS evaluation_metrics (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     model_name TEXT NOT NULL,
+    run_id TEXT NOT NULL,
     k INTEGER NOT NULL,
     precision REAL NOT NULL,
     recall REAL NOT NULL,

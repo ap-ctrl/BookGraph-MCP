@@ -37,11 +37,17 @@ class ContentBasedRecommender:
             corpus.append(combined)
         return corpus
 
-    def fit(self) -> None:
-        """Fit vectorizer on all books in repository."""
-        books, _ = self.repo.search_books(limit=10000)
+    def fit(self, books: Optional[List[Dict[str, Any]]] = None) -> None:
+        """Fit vectorizer on the provided list of book metadata.
+        The caller may supply an explicit list of book dictionaries (as returned by
+        ``BookRepository.search_books``). If None, fetches up to 10,000 books from
+        the repository catalogue.
+        """
+        if books is None:
+            books, _ = self.repo.search_books(limit=10000)
+
         if not books:
-            logger.warning("No books in repository to fit ContentBasedRecommender.")
+            logger.warning("No books provided to fit ContentBasedRecommender.")
             return
 
         self.book_ids = [b["book_id"] for b in books]

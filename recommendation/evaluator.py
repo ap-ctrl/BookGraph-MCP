@@ -27,14 +27,12 @@ class RecommendationEvaluator:
         self.repo = repo
 
     def create_user_aware_split(
-        self, test_ratio: float = 0.25, random_seed: int = 42
+        self, test_ratio: float = 0.25, random_seed: Optional[int] = None
     ) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]]]:
-        """
-        User-aware train/test split.
-        For each user with >= 3 ratings, holds out the latest test_ratio interactions for testing.
-        Guarantees that:
-        1. No (user_id, book_id) interaction appears in both train and test partitions.
-        2. Test ratings are strictly held out from model fitting and seed query selection.
+        """User-aware chronological train/test split.
+        For each user with >= 3 ratings, holds out the most recent ``test_ratio``
+        interactions for testing. No randomisation is performed – the strategy is
+        purely chronological, ensuring reproducibility without a seed.
         """
         all_interactions = self.repo.get_all_interactions()
         df = pd.DataFrame(all_interactions)
@@ -44,7 +42,7 @@ class RecommendationEvaluator:
         train_records: List[Dict[str, Any]] = []
         test_records: List[Dict[str, Any]] = []
 
-        # Sort chronologically if date_added available, otherwise preserve order
+        # Sort chronologically if ``date_added`` column exists.
         if "date_added" in df.columns:
             df = df.sort_values(by=["user_id", "date_added"])
 
@@ -66,8 +64,7 @@ class RecommendationEvaluator:
         assert train_pairs.isdisjoint(test_pairs), "Data leakage detected: train and test pairs overlap!"
 
         logger.info(
-            "User-aware split created (seed=%d): %d train interactions, %d test interactions across %d users.",
-            random_seed,
+            "User-aware split created: %d train interactions, %d test interactions across %d users.",
             len(train_records),
             len(test_records),
             df["user_id"].nunique(),
@@ -173,19 +170,21 @@ class RecommendationEvaluator:
             "evaluation_users": len(precisions),
         }
 
-        # Store in SQLite database
+        # Store in SQLite database with run identifier
+        import uuid
+        run_id = str(uuid.uuid4())
         with get_db_connection(self.repo.db_path) as conn:
             conn.execute(
                 """
-                INSERT INTO evaluation_metrics (model_name, k, precision, recall, ndcg, coverage)
-                VALUES (?, ?, ?, ?, ?, ?);
+                INSERT INTO evaluation_metrics (run_id, model_name, k, precision, recall, ndcg, coverage)
+                VALUES (?, ?, ?, ?, ?, ?, ?);
                 """,
-                (model_name, k, mean_precision, mean_recall, mean_ndcg, coverage),
+                (run_id, model_name, k, mean_precision, mean_recall, mean_ndcg, coverage),
             )
 
         return result
 
-    def run_benchmark(self, k: int = 5, random_seed: int = 42) -> List[Dict[str, Any]]:
+    def run_benchmark(self, k: int = 5) -> List[Dict[str, Any]]:
         """
         Run standardized benchmark comparing all 4 recommendation approaches on isolated training data.
         Guarantees:
@@ -195,7 +194,7 @@ class RecommendationEvaluator:
         - Hybrid recommender receives user training history explicitly without querying the full database.
         - All approaches evaluate on the same eligible test users.
         """
-        train_data, test_data = self.create_user_aware_split(random_seed=random_seed)
+        train_data, test_data = self.create_user_aware_split()
         cat_stats = self.repo.get_catalog_statistics()
         total_books = cat_stats["total_books"]
 
@@ -226,12 +225,13 @@ class RecommendationEvaluator:
 
         # 3. Content-Based (Seeded strictly from user's highest rated book in train_data)
         content = ContentBasedRecommender(self.repo)
-        content.fit()
+        # Fit on full catalogue metadata (no leakage of interaction labels)
+        books, _ = self.repo.search_books(limit=10000)
+        content.fit(books)
         def content_fn(u: str, k_val: int) -> List[Dict[str, Any]]:
             user_train = [t for t in train_data if t["user_id"] == u and t.get("rating", 0) >= 4]
             already_read = user_train_books.get(u, set())
             if user_train:
-                # Select top-rated training book
                 top_b = sorted(user_train, key=lambda x: x.get("rating", 0), reverse=True)[0]["book_id"]
                 return content.recommend_similar(top_b, limit=k_val, exclude_book_ids=already_read)
             return []
@@ -262,7 +262,6 @@ class RecommendationEvaluator:
             cat_stats=cat_stats,
             train_count=len(train_data),
             test_count=len(test_data),
-            random_seed=random_seed,
         )
         return results
 

@@ -8,9 +8,8 @@ version = "0.1.0"
 description = "An MCP-Powered Book Discovery, Recommendation and Reader Analytics System for Romance Literature"
 readme = "README.md"
 requires-python = ">=3.11"
-authors = [
-    { name = "Romance Reader Intelligence Engineering Team" }
-]
+authors = [{ name = "Romance Reader Intelligence Engineering Team" }]
+# Core runtime dependencies
 dependencies = [
     "mcp>=2.3.0",
     "pydantic>=2.10.0",
@@ -34,6 +33,33 @@ dev = [
 
 [project.scripts]
 romance-mcp = "server:main"
+
+[tool.setuptools]
+py-modules = ["server"]
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = [
+    "config*",
+    "database*",
+    "ingestion*",
+    "mcp_server*",
+    "nlp*",
+    "preprocessing*",
+    "recommendation*",
+    "services*",
+    "analysis*",
+]
+exclude = [
+    "tests*",
+    "data*",
+    "reports*",
+    "scripts*",
+    "models*",
+    "__pycache__*",
+    ".venv*",
+    ".pytest_cache*",
+]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

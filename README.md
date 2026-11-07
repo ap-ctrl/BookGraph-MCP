@@ -76,7 +76,7 @@ flowchart TD
     subgraph Storage ["Persistence Layer"]
         SQLite[("Indexed SQLite Database<br/>romance_books.db")]
         Parquet["Parquet Intermediates"]
-        Reports["EDA & Evaluation Markdown Reports"]
+        Reports["EDA & Evaluation Reports"]
     end
 
     Clients <-->|JSON-RPC 2.0| STDIO
@@ -92,7 +92,7 @@ flowchart TD
 
 ## 2. Key Capabilities & Innovations
 
-- **Grounded Recommendations**: The AI assistant ensures that all book titles, tropes, and review excerpts are sourced from the dataset. Recommendations include citations to actual records and provide similarity scores and evidential excerpts.
+- **Grounded Recommendations**: Book recommendations, tropes, and review excerpts are drawn directly from the database catalogue. Responses cite existing records, similarity scores, and evidential text excerpts.
 - **Protocol Hygiene**: When running over STDIO, `sys.stdout` is strictly reserved for pure JSON-RPC 2.0 protocol packets. All operational logging is safely directed to `sys.stderr` to prevent stream corruption.
 - **Memory Discipline**: Avoids loading multi-million-row interaction matrices into dense RAM. Uses `scipy.sparse.csr_matrix` for item-item collaborative filtering and chunked generators for streaming dataset ingestion.
 - **Cold-Start Resilience**: The recommendation engine gracefully detects when a reader has sparse or no history (< 2 ratings), providing informative diagnostic messages and smoothly falling back to content-based or Bayesian popularity ranking.
@@ -102,20 +102,27 @@ flowchart TD
 
 ## 3. Dataset Attribution & Academic Licensing
 
-This project utilizes the **UCSD Goodreads Book Graph (Romance Subset)** developed by Mengting Wan and Julian McAuley:
+This project is designed around the schema and domain of the **UCSD Goodreads Book Graph (Romance Subset)** developed by Mengting Wan and Julian McAuley:
 - **Reference**: Wan, Mengting, and Julian McAuley. *"Item Recommendation on Monotonic Behavior Chains."* Proceedings of the 12th ACM Conference on Recommender Systems (RecSys 2018).
 - **Homepage**: [UCSD Book Graph Project](https://sites.google.com/eng.ucsd.edu/ucsdbookgraph/home)
 - **Dataset Portal**: [UCSD Book Graph Downloads](https://mcauleylab.ucsd.edu/public_datasets/gdrive/goodreads/UCSD%20Book%20Graph.html)
 
-### Published Dataset Statistics (Romance Subset)
+### Published UCSD Dataset Statistics (Romance Subset)
 - **335,449** romance book records
 - **42,792,856** romance reader-book interactions
 - **3,565,378** detailed reader reviews
 
+### Development Sample vs. Full UCSD Dataset
+- **Local Development Sample**: For lightweight development, testing, and CI, the repository includes a curated local sample (`data/raw/sample_books.json.gz`, `data/raw/sample_interactions.json.gz`, `data/raw/sample_reviews.json.gz`). This sample contains 20 canonical romance titles along with synthetic reader interactions and synthetic review texts designed to exercise cold-start boundaries and NLP pipelines. Synthetic interactions are test artifacts and do not represent actual Goodreads user activity.
+- **Full UCSD Ingestion (Optional)**: The streaming dataset reader (`ingestion/dataset_manager.py`) supports downloading and streaming the full multi-gigabyte UCSD `.json.gz` archives. Full UCSD dataset ingestion has not been run or performance-validated locally.
+- **Dataset Mode Configuration**: In `ingestion/dataset_manager.py`, the ingestion mode can be explicitly set:
+  - `development_sample`: Forces the pipeline to use the local development sample files.
+  - `full_dataset`: Requires and ingests the full UCSD dataset files, raising a validation error if files are missing.
+  - `auto`: Automatically detects available files, prioritizing the full dataset when present.
+
 ### Compliance & Restrictions
 - Strictly for academic research and educational use. Direct scraping and redistribution are prohibited.
-- Raw `.json.gz` files are excluded from Git via `.gitignore`.
-- An authentic, schema-compliant canonical development dataset is pre-seeded for reproducible zero-friction setup.
+- Raw `.json.gz` archives are excluded from Git via `.gitignore`.
 
 ---
 
@@ -187,20 +194,23 @@ romance-reader-intelligence/
 │   ├── data_validation_report.md # Processing audit log
 │   ├── exploratory_data_analysis.md # Statistical summary of 10 dimensions
 │   ├── recommendation_evaluation.md # Offline model benchmark metrics
-│   └── figures/               # 5 Publication-ready visualization charts
+│   └── figures/               # 5 Generated visualization charts
 │
 ├── scripts/                   # Executable workflows and utilities
 │   ├── run_pipeline.py        # End-to-end data pipeline runner
 │   ├── demo_query.py          # Interactive terminal query demo
 │   └── test_inspector.py      # Automated STDIO JSON-RPC 2.0 integration tester
 │
-└── tests/                     # Comprehensive test suite (21 tests)
+└── tests/                     # Test suite (37 tests)
     ├── conftest.py            # Test fixtures and server lifecycle
     ├── test_book_tools.py
-    ├── test_recommendation_tools.py
-    ├── test_review_analytics_tools.py
+    ├── test_database_integrity.py
+    ├── test_e2e_scenario.py   # Full Section 11 completion scenario test
     ├── test_mcp_protocol.py
-    └── test_e2e_scenario.py   # Full Section 11 completion scenario test
+    ├── test_nlp_intelligence.py
+    ├── test_recommendation_evaluation.py
+    ├── test_recommendation_tools.py
+    └── test_review_analytics_tools.py
 ```
 
 ---
@@ -225,7 +235,7 @@ source .venv/bin/activate
 
 ### Step 2: Install Dependencies
 ```bash
-pip install -e .
+pip install -e ".[dev]"
 ```
 
 ### Step 3: Run the Ingestion, NLP & Modeling Pipeline
@@ -237,7 +247,7 @@ python scripts/run_pipeline.py
 2. Validates and ingests cleaned books, reader interactions, and reviews.
 3. Runs the **Trope Extraction Engine** (extracting 10 tropes across all titles).
 4. Runs the **Review Sentiment & Thematic Engine** (sentiment scores and pacing/character/plot themes).
-5. Generates **5 publication-ready charts** in `reports/figures/`.
+5. Generates **5 evaluation and EDA charts** in `reports/figures/`.
 6. Executes the **Recommendation Benchmark** using a user-aware train/test split.
 
 ### Step 4: Quick Interactive Terminal Demo
@@ -263,19 +273,19 @@ Running the MCP server directly inside VS Code with **Cline** gives you an in-ed
    - Click the **MCP Servers icon** (the plug/server rack `🔌`/`🖥️`) at the top of the Cline sidebar (or click the Settings gear `⚙️` ➔ MCP Servers).
    - Click **"Configure MCP Servers"**.
 3. **Paste the Server Configuration**:
-   VS Code will open `cline_mcp_settings.json`. Paste this configuration:
+   VS Code will open `cline_mcp_settings.json`. Paste this configuration (replace `<path-to-python-executable>` with your `.venv` Python path and `<path-to-repository-root>` with the absolute path to your cloned repository):
    ```json
    {
      "mcpServers": {
        "romance-reader-intelligence": {
-         "command": "C:/Users/Ankita P/AppData/Local/Programs/Python/Python313/python.exe",
+         "command": "<path-to-python-executable>",
          "args": [
-           "C:/Users/Ankita P/Desktop/Projects/mcp books/server.py",
+           "<path-to-repository-root>/server.py",
            "--transport",
            "stdio"
          ],
          "env": {
-           "PYTHONPATH": "C:/Users/Ankita P/Desktop/Projects/mcp books"
+           "PYTHONPATH": "<path-to-repository-root>"
          },
          "disabled": false,
          "alwaysAllow": [
@@ -296,6 +306,10 @@ Running the MCP server directly inside VS Code with **Cline** gives you an in-ed
      }
    }
    ```
+   > **Example paths**:
+   > - Windows: `"command": "C:/path/to/project/.venv/Scripts/python.exe"`
+   > - macOS / Linux: `"command": "/path/to/project/.venv/bin/python"`
+
 4. **Save and Chat**:
    - Save the file (`Ctrl + S`).
    - You will see `romance-reader-intelligence` light up with a **green status dot**.
@@ -308,19 +322,19 @@ Running the MCP server directly inside VS Code with **Cline** gives you an in-ed
 1. Open your Claude Desktop configuration file:
    - **Windows**: `%APPDATA%\Claude\claude_desktop_config.json`
    - **macOS**: `~/Library/Application Support/Claude/claude_desktop_config.json`
-2. Add the server entry:
+2. Add the server entry (substituting your virtual environment's Python path and project root):
    ```json
    {
      "mcpServers": {
        "romance-reader-intelligence": {
-         "command": "C:/Users/Ankita P/AppData/Local/Programs/Python/Python313/python.exe",
+         "command": "<path-to-python-executable>",
          "args": [
-           "C:/Users/Ankita P/Desktop/Projects/mcp books/server.py",
+           "<path-to-repository-root>/server.py",
            "--transport",
            "stdio"
          ],
          "env": {
-           "PYTHONPATH": "C:/Users/Ankita P/Desktop/Projects/mcp books"
+           "PYTHONPATH": "<path-to-repository-root>"
          }
        }
      }
@@ -411,17 +425,18 @@ The server implements four independent recommendation approaches:
 3. **Collaborative Filtering**: Memory-efficient sparse CSR user-item matrix computing item-item cosine similarities without dense RAM explosion.
 4. **Hybrid Recommender**: Configurable linear combination ($\alpha \cdot \text{content} + (1-\alpha) \cdot \text{collab}$) with automatic fallback to popularity or trope filtering for cold-start readers.
 
-### Benchmark Evaluation Results (User-Aware Train/Test Split)
-Evaluated offline on hold-out reader ratings without interaction leakage:
+### Benchmark Evaluation (Development Sample Baseline)
+Evaluated offline using a user-aware chronological holdout split on the local development sample without interaction leakage:
 
 | Model Architecture | Precision@5 | Recall@5 | NDCG@5 | Catalog Coverage |
 |---|---|---|---|---|
-| **Popularity Baseline** | 0.0000 | 0.0000 | 0.0000 | 25.00% |
-| **Collaborative Filtering (Sparse CSR)** | 0.0000 | 0.0000 | 0.0000 | 45.00% |
-| **Content-Based (TF-IDF)** | **0.1500** | **0.7500** | **0.4231** | **75.00%** |
-| **Hybrid Recommender (Cold-Start Resilient)** | 0.1000 | 0.5000 | 0.2544 | **75.00%** |
+| **Popularity Baseline** | 0.0500 | 0.2500 | 0.1077 | 40.00% |
+| **Collaborative Filtering (Sparse CSR)** | 0.0000 | 0.0000 | 0.0000 | 40.00% |
+| **Content-Based (TF-IDF)** | 0.2000 | 1.0000 | 0.7217 | 75.00% |
+| **Hybrid Recommender** | 0.1500 | 0.7500 | 0.6250 | 75.00% |
 
-*Full metrics and methodology documented in [`reports/recommendation_evaluation.md`](reports/recommendation_evaluation.md).*
+> [!NOTE]
+> These metrics represent a local verification baseline computed on the 20-book development sample to validate train/test separation, metric calculation (Precision@K, Recall@K, NDCG@K), and cold-start fallback mechanics. They do not represent independently validated or generalizable production benchmarks against the full 42M-interaction UCSD dataset. Detailed methodology and sample sparsity dynamics are documented in [`reports/recommendation_evaluation.md`](reports/recommendation_evaluation.md).
 
 ---
 
@@ -449,7 +464,7 @@ Evaluated offline on hold-out reader ratings without interaction leakage:
 
 ## 10. Testing & Verification
 
-Run the comprehensive test suite:
+Run the test suite:
 ```bash
 pytest -v
 ```
@@ -457,34 +472,51 @@ pytest -v
 ```text
 ============================= test session starts =============================
 platform win32 -- Python 3.13.5, pytest-9.2.0, pluggy-1.7.0
-rootdir: C:\Users\Ankita P\Desktop\Projects\mcp books
+rootdir: <path-to-project-root>
 configfile: pyproject.toml
 testpaths: tests
-collected 21 items
+plugins: asyncio-1.4.1.post1, anyio-4.10.0
+collected 37 items
 
-tests\test_book_tools.py::test_search_existing_book PASSED               [  4%]
-tests\test_book_tools.py::test_search_nonexistent_book PASSED            [  9%]
-tests\test_book_tools.py::test_get_book_details PASSED                   [ 14%]
-tests\test_book_tools.py::test_filter_books_by_rating PASSED             [ 19%]
-tests\test_book_tools.py::test_retrieve_trope_based_results PASSED       [ 23%]
-tests\test_book_tools.py::test_compare_two_books PASSED                  [ 28%]
-tests\test_book_tools.py::test_validate_invalid_tool_inputs PASSED       [ 33%]
-tests\test_e2e_scenario.py::test_complete_user_query_scenario PASSED     [ 38%]
-tests\test_mcp_protocol.py::test_mcp_tool_discovery PASSED               [ 42%]
-tests\test_mcp_protocol.py::test_mcp_resource_access PASSED              [ 47%]
-tests\test_mcp_protocol.py::test_mcp_prompt_retrieval PASSED             [ 52%]
-tests\test_mcp_protocol.py::test_mcp_host_integration PASSED             [ 57%]
-tests\test_recommendation_tools.py::test_recommend_similar_books PASSED  [ 61%]
-tests\test_recommendation_tools.py::test_recommendations_for_known_reader PASSED [ 66%]
-tests\test_recommendation_tools.py::test_handle_reader_with_insufficient_history PASSED [ 71%]
-tests\test_recommendation_tools.py::test_popular_books_ranking PASSED    [ 76%]
-tests\test_review_analytics_tools.py::test_analyse_existing_book_reviews PASSED [ 80%]
-tests\test_review_analytics_tools.py::test_handle_books_without_review_data PASSED [ 85%]
-tests\test_review_analytics_tools.py::test_retrieve_catalogue_statistics PASSED [ 90%]
-tests\test_review_analytics_tools.py::test_get_author_insights PASSED    [ 95%]
-tests\test_review_analytics_tools.py::test_get_reader_insights PASSED    [100%]
+tests/test_book_tools.py::test_search_existing_book PASSED               [  2%]
+tests/test_book_tools.py::test_search_nonexistent_book PASSED            [  5%]
+tests/test_book_tools.py::test_get_book_details PASSED                   [  8%]
+tests/test_book_tools.py::test_filter_books_by_rating PASSED             [ 10%]
+tests/test_book_tools.py::test_retrieve_trope_based_results PASSED       [ 13%]
+tests/test_book_tools.py::test_compare_two_books PASSED                  [ 16%]
+tests/test_book_tools.py::test_validate_invalid_tool_inputs PASSED       [ 18%]
+tests/test_database_integrity.py::test_empty_database_behavior PASSED    [ 21%]
+tests/test_database_integrity.py::test_duplicate_book_id_upsert PASSED   [ 24%]
+tests/test_database_integrity.py::test_foreign_key_enforcement_in_database PASSED [ 27%]
+tests/test_database_integrity.py::test_preprocessor_filters_invalid_foreign_keys PASSED [ 29%]
+tests/test_database_integrity.py::test_repeated_pipeline_execution_idempotency PASSED [ 32%]
+tests/test_e2e_scenario.py::test_complete_user_query_scenario PASSED     [ 35%]
+tests/test_mcp_protocol.py::test_mcp_tool_discovery PASSED               [ 37%]
+tests/test_mcp_protocol.py::test_mcp_resource_access PASSED              [ 40%]
+tests/test_mcp_protocol.py::test_mcp_prompt_retrieval PASSED             [ 43%]
+tests/test_mcp_protocol.py::test_mcp_host_integration PASSED             [ 45%]
+tests/test_nlp_intelligence.py::test_sentiment_positive_review PASSED    [ 48%]
+tests/test_nlp_intelligence.py::test_sentiment_negative_review PASSED    [ 51%]
+tests/test_nlp_intelligence.py::test_sentiment_neutral_review PASSED     [ 54%]
+tests/test_nlp_intelligence.py::test_sentiment_negation_handling PASSED  [ 56%]
+tests/test_nlp_intelligence.py::test_sentiment_booster_handling PASSED   [ 59%]
+tests/test_nlp_intelligence.py::test_sentiment_empty_and_whitespace PASSED [ 62%]
+tests/test_nlp_intelligence.py::test_trope_extraction_evidence_traceability PASSED [ 64%]
+tests/test_nlp_intelligence.py::test_review_theme_extraction PASSED      [ 67%]
+tests/test_recommendation_evaluation.py::test_dcg_calculation PASSED     [ 70%]
+tests/test_recommendation_evaluation.py::test_idcg_and_ndcg_mathematical_correctness PASSED [ 72%]
+tests/test_recommendation_evaluation.py::test_user_aware_split_disjointness PASSED [ 75%]
+tests/test_recommendation_tools.py::test_recommend_similar_books PASSED  [ 78%]
+tests/test_recommendation_tools.py::test_recommendations_for_known_reader PASSED [ 81%]
+tests/test_recommendation_tools.py::test_handle_reader_with_insufficient_history PASSED [ 83%]
+tests/test_recommendation_tools.py::test_popular_books_ranking PASSED    [ 86%]
+tests/test_review_analytics_tools.py::test_analyse_existing_book_reviews PASSED [ 89%]
+tests/test_review_analytics_tools.py::test_handle_books_without_review_data PASSED [ 91%]
+tests/test_review_analytics_tools.py::test_retrieve_catalogue_statistics PASSED [ 94%]
+tests/test_review_analytics_tools.py::test_get_author_insights PASSED    [ 97%]
+tests/test_review_analytics_tools.py::test_get_reader_insights PASSED    [100%]
 
-============================= 21 passed in 0.62s ==============================
+============================= 37 passed in 3.03s ==============================
 ```
 
 Test STDIO JSON-RPC 2.0 protocol compliance:
